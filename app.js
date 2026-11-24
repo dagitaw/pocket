@@ -1,16 +1,16 @@
-// Pocket — single-page money tracker. Data lives in Supabase (REST, no SDK).
+// Pocket — simple money tracker. Data in Supabase (REST, no SDK). Base currency: Birr.
 const SB_URL = 'https://caixinoemxmoeudpqsuc.supabase.co';
 const SB_KEY = 'sb_publishable_hyYuYBDBDK8AAunk4xRPtA_NlxM-wWK';
 const BASE = 'ETB';
-const CURRENCIES = ['ETB', 'USD', 'EUR', 'GBP', 'AED', 'SAR', 'CNY', 'KES', 'CAD', 'AUD', 'JPY', 'TRY', 'INR'];
+const ALL_CURRENCIES = ['USD', 'EUR', 'GBP', 'AED', 'SAR', 'CNY', 'KES', 'CAD', 'AUD', 'TRY', 'INR'];
 const SYM = { ETB: 'Br ', USD: '$', EUR: '€', GBP: '£' };
+const PIE = ['#1f5c46', '#b8325a', '#3f8f6f', '#e08aa3', '#b7791f', '#7cbf9e', '#e3b86b', '#8a9a92'];
 const LIVE_TTL = 6 * 3600e3;
 
-/* ---------- data layer ---------- */
+/* ---------- data ---------- */
 async function api(path, { method = 'GET', body, prefer = 'return=representation' } = {}) {
   const res = await fetch(`${SB_URL}/rest/v1/${path}`, {
-    method,
-    headers: { apikey: SB_KEY, 'Content-Type': 'application/json', Prefer: prefer },
+    method, headers: { apikey: SB_KEY, 'Content-Type': 'application/json', Prefer: prefer },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
@@ -35,34 +35,31 @@ async function loadTx() {
 
 /* ---------- state & helpers ---------- */
 const today = () => new Date().toLocaleDateString('en-CA');
-const S = {
-  accounts: [], categories: [], bills: [], goals: [], debts: [], tx: [], settings: {},
-  live: {}, liveAt: 0, month: today().slice(0, 7), view: 'overview',
-  f: { q: '', kind: '', cat: '', acc: '', all: false },
-};
+const S = { categories: [], bills: [], goals: [], debts: [], tx: [], settings: {}, live: {}, liveAt: 0, month: today().slice(0, 7), view: 'home', q: '', kind: '' };
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const num = v => Number.isFinite(+v) ? +v : 0;
-const money = (n, cur = BASE) => (n < 0 ? '-' : '') + (SYM[cur] ?? cur + ' ') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const short = n => (n < 0 ? '-' : '') + (Math.abs(n) >= 1e6 ? (Math.abs(n) / 1e6).toFixed(1) + 'M' : Math.abs(n) >= 1e3 ? Math.round(Math.abs(n) / 1e3) + 'k' : Math.round(Math.abs(n)));
+const num = v => (Number.isFinite(+v) ? +v : 0);
+const fmt = n => Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (n, cur = BASE) => (n < 0 ? '-' : '') + (SYM[cur] ?? cur + ' ') + fmt(n);
 const addMonth = (ym, d) => { const t = new Date(+ym.slice(0, 4), +ym.slice(5, 7) - 1 + d, 1); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`; };
-const monthName = (ym, opt = { month: 'long', year: 'numeric' }) => new Date(ym + '-01T00:00').toLocaleDateString('en-US', opt);
+const monthName = (ym, o = { month: 'long', year: 'numeric' }) => new Date(ym + '-01T00:00').toLocaleDateString('en-US', o);
 const daysIn = ym => new Date(+ym.slice(0, 4), +ym.slice(5, 7), 0).getDate();
-const niceDate = d => new Date(d + 'T00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+const dayName = d => new Date(d + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const byId = (list, id) => list.find(x => x.id === id);
-const acc = id => byId(S.accounts, id);
 const cat = id => byId(S.categories, id);
-const accCur = id => acc(id)?.currency || BASE;
+const isThisMonth = () => S.month === today().slice(0, 7);
 
-// Rates: ETB per 1 unit. Custom override beats live.
+// Rates are Birr per 1 unit. Your own rate beats the live one.
 const overrides = () => S.settings.rate_overrides || {};
-const liveRate = cur => cur === BASE ? 1 : S.live[cur] || 0;
-const rate = cur => cur === BASE ? 1 : num(overrides()[cur]) || liveRate(cur) || 1;
-const etb = t => num(t.amount) * num(t.rate || 1);
+const liveRate = c => (c === BASE ? 1 : S.live[c] || 0);
+const rate = c => (c === BASE ? 1 : num(overrides()[c]) || liveRate(c) || 1);
+const currencies = () => [BASE, ...new Set(['USD', 'EUR', ...Object.keys(overrides()), ...(S.settings.currencies || [])])];
+const birr = t => num(t.amount) * num(t.rate || 1);
 
 async function loadLive(force = false) {
+  const cached = () => { try { return JSON.parse(localStorage.getItem('pocket.live')); } catch { return null; } };
   try {
-    const c = JSON.parse(localStorage.getItem('pocket.live') || 'null');
+    const c = cached();
     if (c && !force && Date.now() - c.at < LIVE_TTL) { S.live = c.rates; S.liveAt = c.at; return; }
     const d = await fetch('https://open.er-api.com/v6/latest/ETB').then(r => r.json());
     if (d.result !== 'success') throw new Error('rates');
@@ -70,9 +67,9 @@ async function loadLive(force = false) {
     S.liveAt = Date.now();
     localStorage.setItem('pocket.live', JSON.stringify({ rates: S.live, at: S.liveAt }));
   } catch {
-    const c = JSON.parse(localStorage.getItem('pocket.live') || 'null');
+    const c = cached();
     if (c) { S.live = c.rates; S.liveAt = c.at; }
-    if (force) toast('Could not refresh live rates', true);
+    if (force) toast("Couldn't reach the rates service. Using the last saved rates.", true);
   }
 }
 
@@ -84,489 +81,329 @@ function toast(msg, err = false) {
 }
 async function run(fn, ok) {
   try { await fn(); if (ok) toast(ok); render(); return true; }
-  catch (e) { console.error(e); toast('Something went wrong: ' + e.message.slice(0, 80), true); return false; }
+  catch (e) { console.error(e); toast("Couldn't save. Check your connection and try again.", true); return false; }
 }
 
-/* ---------- calculations ---------- */
+/* ---------- numbers ---------- */
 const inMonth = (t, ym = S.month) => t.date.startsWith(ym);
-function monthTotals(ym = S.month) {
+function totals(ym = S.month) {
   let income = 0, expense = 0;
-  for (const t of S.tx) if (inMonth(t, ym)) { if (t.kind === 'income') income += etb(t); else if (t.kind === 'expense') expense += etb(t); }
-  return { income, expense, net: income - expense };
+  for (const t of S.tx) if (inMonth(t, ym)) t.kind === 'income' ? (income += birr(t)) : (expense += birr(t));
+  return { income, expense };
 }
-function balance(a) {
-  let b = num(a.opening_balance);
-  for (const t of S.tx) {
-    if (t.account_id === a.id) b += t.kind === 'income' ? num(t.amount) : -num(t.amount);
-    if (t.kind === 'transfer' && t.to_account_id === a.id) b += num(t.to_amount ?? t.amount);
-  }
-  return b;
-}
-const netWorth = () => S.accounts.filter(a => !a.archived).reduce((s, a) => s + balance(a) * rate(a.currency), 0);
+const allTimeKept = () => S.tx.reduce((s, t) => s + (t.kind === 'income' ? birr(t) : -birr(t)), 0);
 function spendByCat(ym = S.month) {
   const m = new Map();
-  for (const t of S.tx) if (t.kind === 'expense' && inMonth(t, ym)) m.set(t.category_id, (m.get(t.category_id) || 0) + etb(t));
+  for (const t of S.tx) if (t.kind === 'expense' && inMonth(t, ym)) m.set(t.category_id, (m.get(t.category_id) || 0) + birr(t));
   return m;
 }
 const billTx = (b, ym = S.month) => S.tx.find(t => t.bill_id === b.id && inMonth(t, ym));
 const dueDate = (b, ym = S.month) => `${ym}-${String(Math.min(b.day_of_month, daysIn(ym))).padStart(2, '0')}`;
-const debtLeft = d => Math.max(num(d.amount) - num(d.paid), 0);
+const owedLeft = d => Math.max(num(d.amount) - num(d.paid), 0);
 
-/* ---------- small render pieces ---------- */
-const stat = (lbl, val, sub = '', cls = '') => `<div class="card stat"><div class="lbl">${lbl}</div><div class="val ${cls}">${val}</div><small>${sub}</small></div>`;
-const progress = (pct, cls = '') => `<div class="bar ${cls}"><i style="width:${Math.min(Math.max(pct, 0), 100).toFixed(1)}%"></i></div>`;
-const catIcon = c => `<span class="ico" style="background:${esc(c?.color || '#94a3b8')}22;color:${esc(c?.color || '#94a3b8')}">${esc(c?.icon || '•')}</span>`;
-const opts = (list, sel, label = x => x.name) => list.map(x => `<option value="${x.id}" ${x.id === sel ? 'selected' : ''}>${esc(label(x))}</option>`).join('');
-const curOpts = sel => [...new Set([...CURRENCIES, sel].filter(Boolean))].map(c => `<option ${c === sel ? 'selected' : ''}>${c}</option>`).join('');
+/* ---------- pieces ---------- */
+const emoji = c => `<span class="emoji">${esc(c?.icon || '•')}</span>`;
+const bar = (pct, cls = '') => `<div class="bar ${cls}"><i style="width:${Math.min(Math.max(pct, 0), 100).toFixed(1)}%"></i></div>`;
+const empty = (msg, act, label) => `<div class="empty">${msg}${act ? `<br><button type="button" class="btn small" data-act="${act}">${label}</button>` : ''}</div>`;
 
-function donut(items, total, label, value) {
-  const r = 70, C = 2 * Math.PI * r;
+function txRow(t) {
+  const c = cat(t.category_id), cur = t.currency || BASE, inc = t.kind === 'income';
+  return `<button type="button" class="row" data-act="edit-tx" data-id="${t.id}">${emoji(c)}
+    <span class="main"><b>${esc(t.note || c?.name || (inc ? 'Money in' : 'Spent'))}</b><small>${esc(c?.name || 'No category')}, ${dayName(t.date)}</small></span>
+    <span class="amt ${inc ? 'in' : 'out'}">${inc ? '+' : '−'}${money(num(t.amount), cur)}${cur !== BASE ? `<small>${money(birr(t))} at ${num(t.rate)}</small>` : ''}</span></button>`;
+}
+function pie(items, total) {
+  const r = 52, C = 2 * Math.PI * r;
   let off = 0;
-  const segs = items.map(it => {
-    const len = total ? (it.value / total) * C : 0;
-    const s = `<circle r="${r}" cx="90" cy="90" fill="none" stroke="${esc(it.color)}" stroke-width="22" stroke-dasharray="${Math.max(len - (items.length > 1 ? 1.5 : 0), 0)} ${C}" stroke-dashoffset="${-off}" transform="rotate(-90 90 90)"><title>${esc(it.name)}: ${money(it.value)}</title></circle>`;
+  const segs = items.map((it, i) => {
+    const len = (it.value / total) * C;
+    const s = `<circle r="${r}" cx="74" cy="74" fill="none" stroke="${PIE[i % PIE.length]}" stroke-width="20" stroke-dasharray="${Math.max(len - (items.length > 1 ? 2 : 0), 0.01)} ${C}" stroke-dashoffset="${-off}" transform="rotate(-90 74 74)"><title>${esc(it.name)}: ${money(it.value)}</title></circle>`;
     off += len; return s;
   }).join('');
-  return `<svg class="donut" viewBox="0 0 180 180" role="img" aria-label="${esc(label)}">
-    <circle r="${r}" cx="90" cy="90" fill="none" stroke="var(--track)" stroke-width="22"/>${segs}
-    <text x="90" y="84" font-size="11" fill="var(--muted)" style="fill:var(--muted)">${esc(label)}</text>
-    <text x="90" y="104" font-size="17" font-weight="700">${esc(value)}</text></svg>`;
+  return `<svg viewBox="0 0 148 148" role="img" aria-label="Spending by category">${segs}</svg>`;
 }
-function barsChart(months) {
-  const W = 360, H = 170, pad = 22, max = Math.max(1, ...months.flatMap(m => [m.income, m.expense]));
-  const gw = (W - 10) / months.length, bw = Math.min(16, gw / 3);
-  const bars = months.map((m, i) => {
-    const x = 5 + i * gw + gw / 2, hi = (m.income / max) * (H - pad - 10), he = (m.expense / max) * (H - pad - 10);
-    return `<rect x="${x - bw - 1}" y="${H - pad - hi}" width="${bw}" height="${hi}" rx="3" fill="var(--accent)"><title>${m.label} income: ${money(m.income)}</title></rect>
-      <rect x="${x + 1}" y="${H - pad - he}" width="${bw}" height="${he}" rx="3" fill="var(--red)"><title>${m.label} expenses: ${money(m.expense)}</title></rect>
-      <text x="${x}" y="${H - 6}">${m.label}</text>`;
-  }).join('');
-  return `<svg class="bars" viewBox="0 0 ${W} ${H}" role="img" aria-label="Income vs expenses, last 6 months">
-    <line x1="0" x2="${W}" y1="${H - pad}" y2="${H - pad}" stroke="var(--line)"/>${bars}</svg>
-    <div class="row" style="gap:16px;margin-top:6px"><small class="row" style="gap:6px"><span class="dot" style="background:var(--accent)"></span>Income</small><small class="row" style="gap:6px"><span class="dot" style="background:var(--red)"></span>Expenses</small></div>`;
-}
-function txRow(t) {
-  const c = cat(t.category_id), a = acc(t.account_id), cur = t.currency || BASE;
-  const isT = t.kind === 'transfer';
-  const title = t.note || (isT ? 'Transfer' : c?.name || 'Uncategorized');
-  const sub = isT ? `${esc(a?.name || '?')} → ${esc(acc(t.to_account_id)?.name || '?')}` : `${esc(c?.name || 'Uncategorized')} · ${esc(a?.name || 'No account')}`;
-  const sign = t.kind === 'income' ? '+' : t.kind === 'expense' ? '-' : '';
-  const cls = t.kind === 'income' ? 'pos' : t.kind === 'expense' ? 'neg' : 'muted';
-  const icon = isT ? `<span class="ico" style="background:var(--panel2)">⇄</span>` : catIcon(c);
-  return `<div class="item click" data-act="edit-tx" data-id="${t.id}">${icon}
-    <div class="main"><b>${esc(title)}</b><small>${sub}</small></div>
-    <div class="amt ${cls}">${sign}${money(num(t.amount), cur)}${cur !== BASE ? `<small class="muted">≈ ${money(etb(t))} @ ${num(t.rate)}</small>` : ''}</div></div>`;
-}
-const empty = (msg, btn = '') => `<div class="empty">${msg}${btn ? `<div style="margin-top:12px">${btn}</div>` : ''}</div>`;
 
 /* ---------- views ---------- */
 const V = {};
 
-V.overview = () => {
-  const { income, expense, net } = monthTotals();
-  const prev = monthTotals(addMonth(S.month, -1));
-  const pct = num(S.settings.savings_pct ?? 20);
-  const target = income * pct / 100;
-  const spend = [...spendByCat()].map(([id, value]) => ({ ...(cat(id) || { name: 'Uncategorized', color: '#94a3b8' }), value })).sort((a, b) => b.value - a.value);
-  const top = spend.slice(0, 7);
-  if (spend.length > 7) top.push({ name: 'Others', color: '#64748b', value: spend.slice(7).reduce((s, x) => s + x.value, 0) });
-  const months = Array.from({ length: 6 }, (_, i) => { const ym = addMonth(S.month, i - 5); return { ...monthTotals(ym), label: monthName(ym, { month: 'short' }) }; });
+V.home = () => {
+  const { income, expense } = totals(), left = income - expense;
+  const pct = num(S.settings.savings_pct ?? 20), keepGoal = income * pct / 100;
+  const spentPct = income ? expense / income * 100 : expense ? 100 : 0;
+  let note = 'Add what you earned this month to see how much you keep.';
+  if (income) note = left < 0 ? `You've spent ${money(-left)} more than you earned.`
+    : left >= keepGoal ? `You're keeping ${Math.round(left / income * 100)}% of what you earned. Your goal is ${pct}%.`
+    : `You're ${money(keepGoal - left)} short of keeping ${pct}%.`;
 
-  // insights
-  const ins = [];
-  const isCur = S.month === today().slice(0, 7);
-  if (income) {
-    const rateSaved = net / income * 100;
-    ins.push([rateSaved >= pct ? '🎯' : '⚠️', `You kept <b>${rateSaved.toFixed(0)}%</b> of income this month (target ${pct}%).`]);
-  }
-  if (spend[0]) ins.push(['📊', `Biggest spend: <b>${esc(spend[0].name)}</b> — ${(spend[0].value / expense * 100).toFixed(0)}% of expenses.`]);
-  if (prev.expense) {
-    const ch = (expense - prev.expense) / prev.expense * 100;
-    ins.push([ch > 0 ? '📈' : '📉', `Spending is <b class="${ch > 0 ? 'neg' : 'pos'}">${ch > 0 ? '+' : ''}${ch.toFixed(0)}%</b> vs last month.`]);
-  }
-  if (isCur && expense) {
-    const d = +today().slice(8), avg = expense / d;
-    ins.push(['🗓️', `Daily average <b>${money(avg)}</b> → about <b>${money(avg * daysIn(S.month))}</b> by month end.`]);
-  }
-  const over = S.categories.filter(c => c.kind === 'expense' && num(c.budget) > 0 && (spendByCat().get(c.id) || 0) > num(c.budget));
-  if (over.length) ins.push(['🚨', `Over budget: <b>${over.map(c => esc(c.name)).join(', ')}</b>.`]);
-  const unpaid = S.bills.filter(b => b.active && b.kind === 'expense' && !billTx(b));
-  if (unpaid.length) ins.push(['🧾', `${unpaid.length} bill${unpaid.length > 1 ? 's' : ''} still to pay: <b>${money(unpaid.reduce((s, b) => s + num(b.amount) * rate(b.currency), 0))}</b>.`]);
-  if (!ins.length) ins.push(['✨', 'Add some transactions to see insights.']);
+  const spend = [...spendByCat()].map(([id, value]) => ({ c: cat(id), name: cat(id)?.name || 'No category', value })).sort((a, b) => b.value - a.value);
+  const budgeted = S.categories.filter(c => c.kind === 'expense' && num(c.budget) > 0 && !spend.some(s => s.c?.id === c.id)).map(c => ({ c, name: c.name, value: 0 }));
+  const rows = [...spend, ...budgeted];
+  const unpaid = S.bills.filter(b => !billTx(b)).sort((a, b) => a.day_of_month - b.day_of_month);
+  const recent = S.tx.filter(t => inMonth(t)).slice(0, 5);
 
-  const bills = S.bills.filter(b => b.active).sort((a, b) => !!billTx(a) - !!billTx(b) || a.day_of_month - b.day_of_month).slice(0, 6);
-  const recent = S.tx.filter(t => inMonth(t)).slice(0, 6);
-
-  return `<section class="stats">
-      ${stat('Income', money(income), monthName(S.month, { month: 'long' }), 'pos')}
-      ${stat('Expenses', money(expense), income ? `${(expense / income * 100).toFixed(0)}% of income` : '', 'neg')}
-      ${stat('Net this month', money(net), net >= 0 ? 'Left over' : 'Overspent', net >= 0 ? '' : 'neg')}
-      ${stat('Total balance', money(netWorth()), 'All accounts, today\'s rates')}
-      ${stat(`Save ${pct}%`, money(target), income ? (net >= target ? 'On track 🎉' : `Short by ${money(target - net)}`) : 'No income yet', '')}
-    </section>
-    <div class="grid2">
-      <div class="card"><h3>Spending by category</h3>
-        ${spend.length ? `<div class="chart-wrap">${donut(top, expense, 'Spent', short(expense))}
-          <ul class="legend">${top.map(x => `<li><span class="dot" style="background:${esc(x.color)}"></span><span>${esc(x.icon || '')} ${esc(x.name)}</span><span class="num">${money(x.value)}</span><small class="num" style="width:36px;text-align:right">${(x.value / expense * 100).toFixed(0)}%</small></li>`).join('')}</ul></div>`
-          : empty('No expenses this month.')}
-      </div>
-      <div class="card"><h3>Income vs expenses · 6 months</h3>${barsChart(months)}</div>
-    </div>
-    <div class="grid3">
-      <div class="card"><h3>Smart insights</h3><ul class="insights">${ins.map(([i, t]) => `<li><span>${i}</span><span>${t}</span></li>`).join('')}</ul></div>
-      <div class="card"><div class="head" style="margin:0 0 12px"><h3>Accounts</h3><a href="#settings" class="muted" style="font-size:12px">Manage</a></div>
-        <div class="list mini">${S.accounts.filter(a => !a.archived).map(a => { const b = balance(a); return `<div class="item"><span class="dot" style="background:${esc(a.color)}"></span><div class="main"><b>${esc(a.name)}</b></div><div class="amt ${b < 0 ? 'neg' : ''}">${money(b, a.currency)}${a.currency !== BASE ? `<small class="muted">≈ ${money(b * rate(a.currency))}</small>` : ''}</div></div>`; }).join('') || empty('No accounts')}</div></div>
-      <div class="card"><div class="head" style="margin:0 0 12px"><h3>Bills this month</h3><a href="#bills" class="muted" style="font-size:12px">All bills</a></div>
-        <div class="list mini">${bills.map(billRow).join('') || empty('No bills yet.')}</div></div>
-    </div>
-    <div class="head"><h3>Recent in ${monthName(S.month, { month: 'long' })}</h3><a href="#transactions" class="muted" style="font-size:12px">See all</a></div>
-    <div class="list">${recent.map(txRow).join('') || empty('Nothing here yet.', '<button class="primary" data-act="add-tx">+ Add transaction</button>')}</div>`;
-};
-
-V.transactions = () => {
-  const f = S.f, q = f.q.toLowerCase();
-  const list = S.tx.filter(t => (f.all || inMonth(t)) && (!f.kind || t.kind === f.kind) && (!f.cat || t.category_id === f.cat)
-    && (!f.acc || t.account_id === f.acc || t.to_account_id === f.acc)
-    && (!q || `${t.note} ${cat(t.category_id)?.name || ''} ${acc(t.account_id)?.name || ''} ${t.amount}`.toLowerCase().includes(q)));
-  let inc = 0, exp = 0;
-  for (const t of list) t.kind === 'income' ? inc += etb(t) : t.kind === 'expense' ? exp += etb(t) : 0;
-  const groups = {};
-  for (const t of list) (groups[t.date] ||= []).push(t);
-  return `<div class="head"><h2>Transactions</h2><small>${list.length} items · <span class="pos">+${money(inc)}</span> · <span class="neg">-${money(exp)}</span></small></div>
-    <div class="filters">
-      <input type="search" placeholder="Search notes, categories, amounts…" value="${esc(f.q)}" data-f="q">
-      <select data-f="kind"><option value="">All types</option>${['expense', 'income', 'transfer'].map(k => `<option value="${k}" ${f.kind === k ? 'selected' : ''}>${k[0].toUpperCase() + k.slice(1)}</option>`).join('')}</select>
-      <select data-f="cat"><option value="">All categories</option>${opts(S.categories, f.cat)}</select>
-      <select data-f="acc"><option value="">All accounts</option>${opts(S.accounts, f.acc)}</select>
-      <label class="check"><input type="checkbox" data-f="all" ${f.all ? 'checked' : ''}> All months</label>
-      <button data-act="export">Export CSV</button>
-    </div>
-    ${Object.entries(groups).map(([d, ts]) => {
-      const dayNet = ts.reduce((s, t) => s + (t.kind === 'income' ? etb(t) : t.kind === 'expense' ? -etb(t) : 0), 0);
-      return `<div class="day"><span>${niceDate(d)}</span><span class="${dayNet >= 0 ? 'pos' : 'neg'}">${money(dayNet)}</span></div><div class="list">${ts.map(txRow).join('')}</div>`;
-    }).join('') || `<div style="margin-top:14px">${empty('No transactions match.', '<button class="primary" data-act="add-tx">+ Add transaction</button>')}</div>`}`;
-};
-
-V.budgets = () => {
-  const spend = spendByCat();
-  const cats = S.categories.filter(c => c.kind === 'expense');
-  const totalB = cats.reduce((s, c) => s + num(c.budget), 0);
-  const totalS = cats.filter(c => num(c.budget) > 0).reduce((s, c) => s + (spend.get(c.id) || 0), 0);
-  const avg3 = id => [1, 2, 3].reduce((s, i) => s + (spendByCat(addMonth(S.month, -i)).get(id) || 0), 0) / 3;
-  const isCur = S.month === today().slice(0, 7);
-  const dayPct = isCur ? +today().slice(8) / daysIn(S.month) * 100 : 100;
-  const card = c => {
-    const b = num(c.budget), s = spend.get(c.id) || 0, p = b ? s / b * 100 : 0, a = avg3(c.id);
-    const cls = !b ? '' : p > 100 ? 'over' : p > dayPct + 10 || p > 85 ? 'near' : '';
-    return `<div class="card">
-      <div class="row">${catIcon(c)}<div class="grow"><b>${esc(c.name)}</b><br><small>${b ? (p > 100 ? `<span class="neg">Over by ${money(s - b)}</span>` : `${money(b - s)} left`) : 'No limit set'}</small></div>
-      <div style="text-align:right"><b class="num">${money(s)}</b><br><small>${b ? `of ${money(b)}` : ''}</small></div></div>
-      ${b ? progress(p, cls) : '<div style="height:10px"></div>'}
-      <div class="row" style="margin-top:6px"><input type="number" min="0" step="any" placeholder="Monthly limit (Br)" value="${b || ''}" data-budget="${c.id}">
-      ${a ? `<button class="sm ghost" data-act="use-avg" data-id="${c.id}" data-v="${Math.round(a)}" title="Average of the last 3 months">Avg ${short(a)}</button>` : ''}</div></div>`;
+  const catRow = (s, i) => {
+    const b = num(s.c?.budget), p = b ? s.value / b * 100 : 0;
+    const sub = b ? (s.value > b ? `<span class="out">${money(s.value - b)} over your ${money(b)} limit</span>` : `${money(b - s.value)} left of ${money(b)}`) : 'Tap to set a monthly limit';
+    return `<button type="button" class="row" data-act="budget" data-id="${s.c?.id || ''}">
+      <span class="emoji" style="box-shadow: inset 4px 0 ${s.value ? PIE[i % PIE.length] : 'transparent'}">${esc(s.c?.icon || '•')}</span>
+      <span class="main"><b>${esc(s.name)}</b><small>${sub}</small>${b ? bar(p, p > 100 ? 'over' : p > 85 ? 'warn' : '') : ''}</span>
+      <span class="amt">${money(s.value)}</span></button>`;
   };
-  return `<div class="head"><h2>Budgets · ${monthName(S.month)}</h2></div>
-    <div class="card"><div class="split"><span>Spent of budgeted categories</span><span>${isCur ? `${dayPct.toFixed(0)}% of month gone` : ''}</span></div>
-      <div class="row" style="margin-top:6px"><b style="font-size:22px" class="num">${money(totalS)}</b><span class="muted">of ${money(totalB)}</span></div>
-      ${progress(totalB ? totalS / totalB * 100 : 0, totalS > totalB && totalB ? 'over' : '')}
-      <small>Set a monthly limit for each category below. Limits are in Birr and repeat every month.</small></div>
-    <div class="cards" style="margin-top:12px">${cats.sort((a, b) => (spend.get(b.id) || 0) - (spend.get(a.id) || 0)).map(card).join('')}</div>`;
+
+  return `<section class="hero">
+      <p>${left >= 0 ? 'Left this month' : 'Overspent this month'}</p>
+      <div class="big"><small>Br</small>${fmt(left)}</div>
+      <div class="track" aria-hidden="true"><i style="width:${Math.min(spentPct, 100)}%"></i>${income ? `<b style="left:${100 - pct}%" title="Spend up to here to keep ${pct}%"></b>` : ''}</div>
+      <div class="legend"><span>Earned ${money(income)}</span><span>Spent ${money(expense)}</span></div>
+      <p class="note">${note}<br>All time you've kept ${money(allTimeKept())}.</p>
+    </section>
+
+    <h2>Spending</h2>
+    <div class="group">${expense ? `<div class="spend">${pie(spend, expense)}<div class="total">Spent in ${monthName(S.month, { month: 'long' })}<b class="num">${money(expense)}</b></div></div>` : ''}
+      ${rows.map(catRow).join('') || empty('Nothing spent this month yet.', 'add', 'Add spending')}</div>
+
+    ${unpaid.length ? `<h2>Bills to pay <a href="#bills">All bills</a></h2><div class="group">${unpaid.slice(0, 5).map(billRow).join('')}</div>` : ''}
+
+    <h2>Recent <a href="#history">See all</a></h2>
+    <div class="group">${recent.map(txRow).join('') || empty('No money in or out this month yet.', 'add', 'Add the first one')}</div>`;
+};
+
+V.history = () => {
+  const q = S.q.toLowerCase();
+  const list = S.tx.filter(t => (q ? true : inMonth(t)) && (!S.kind || t.kind === S.kind)
+    && (!q || `${t.note} ${cat(t.category_id)?.name || ''} ${t.amount}`.toLowerCase().includes(q)));
+  let inc = 0, exp = 0;
+  for (const t of list) t.kind === 'income' ? (inc += birr(t)) : (exp += birr(t));
+  const days = {};
+  for (const t of list) (days[t.date] ||= []).push(t);
+  const chip = (k, l) => `<button type="button" class="chip ${S.kind === k ? 'on' : ''}" data-act="kind" data-k="${k}">${l}</button>`;
+  return `<h2>${q ? 'Search results' : monthName(S.month)}</h2>
+    <div class="chips">${chip('', 'All')}${chip('expense', 'Spent')}${chip('income', 'Earned')}</div>
+    <input class="search" type="search" placeholder="Search all months" value="${esc(S.q)}" data-q aria-label="Search">
+    <p class="quiet">Earned <span class="in num">${money(inc)}</span>, spent <span class="out num">${money(exp)}</span></p>
+    ${Object.entries(days).map(([d, ts]) => `<div class="daylabel"><span>${new Date(d + 'T00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', ...(q ? { year: 'numeric' } : {}) })}</span></div><div class="group">${ts.map(txRow).join('')}</div>`).join('')
+      || `<div class="group">${empty(q ? 'Nothing matches that search.' : 'No money in or out this month yet.', q ? '' : 'add', 'Add the first one')}</div>`}`;
 };
 
 function billRow(b) {
   const t = billTx(b), due = dueDate(b), late = !t && due < today();
-  return `<div class="item ${t ? 'done' : ''}"><input type="checkbox" ${t ? 'checked' : ''} data-act="toggle-bill" data-id="${b.id}" aria-label="Mark ${esc(b.name)} paid">
-    <div class="main"><b>${esc(b.name)}</b><small>${late ? '<span class="neg">Overdue · </span>' : ''}Due ${niceDate(due).replace(/^\w+, /, '')}${b.auto_add ? ' · auto' : ''}</small></div>
-    <div class="amt ${b.kind === 'income' ? 'pos' : ''}">${money(num(b.amount), b.currency)}</div></div>`;
+  return `<div class="row ${t ? 'done' : ''}">
+    <input type="checkbox" class="check" ${t ? 'checked' : ''} data-act="pay-bill" data-id="${b.id}" aria-label="Mark ${esc(b.name)} as paid">
+    <span class="main tap" data-act="edit-bill" data-id="${b.id}" style="cursor:pointer"><b>${esc(b.name)}</b>
+      <small>${t ? `Paid ${dayName(t.date)}` : late ? `<span class="out">Overdue since ${dayName(due)}</span>` : `Due ${dayName(due)}`}${b.auto_add ? ', added automatically' : ''}</small></span>
+    <span class="amt">${money(num(b.amount), b.currency)}${b.currency !== BASE ? `<small>${money(num(b.amount) * rate(b.currency))}</small>` : ''}</span></div>`;
 }
 V.bills = () => {
-  const bills = S.bills.filter(b => b.active).sort((a, b) => a.day_of_month - b.day_of_month);
-  const exp = bills.filter(b => b.kind === 'expense');
-  const paid = exp.filter(b => billTx(b));
-  const left = exp.filter(b => !billTx(b)).reduce((s, b) => s + num(b.amount) * rate(b.currency), 0);
-  const row = b => {
-    const t = billTx(b), due = dueDate(b), late = !t && due < today(), c = cat(b.category_id);
-    return `<div class="item ${t ? 'done' : ''}">
-      <input type="checkbox" ${t ? 'checked' : ''} data-act="toggle-bill" data-id="${b.id}" aria-label="Mark ${esc(b.name)} paid">
-      ${catIcon(c)}
-      <div class="main"><b>${esc(b.name)}${b.auto_add ? '<span class="badge green">Auto</span>' : ''}${late ? '<span class="badge red">Overdue</span>' : ''}</b>
-        <small>${b.kind === 'income' ? 'Income' : 'Pay'} on day ${b.day_of_month} · ${esc(acc(b.account_id)?.name || 'No account')}${t ? ` · done ${niceDate(t.date)}` : ''}</small></div>
-      <div class="amt ${b.kind === 'income' ? 'pos' : ''}">${money(num(b.amount), b.currency)}${b.currency !== BASE ? `<small class="muted">≈ ${money(num(b.amount) * rate(b.currency))}</small>` : ''}</div>
-      <div class="btns"><button class="sm ghost" data-act="edit-bill" data-id="${b.id}">Edit</button></div></div>`;
-  };
-  const off = S.bills.filter(b => !b.active);
-  return `<div class="head"><h2>Bills & recurring · ${monthName(S.month)}</h2><button class="primary" data-act="edit-bill">+ New bill</button></div>
-    <div class="card"><div class="split"><span>${paid.length} of ${exp.length} paid</span><span>${money(left)} left to pay</span></div>
-      ${progress(exp.length ? paid.length / exp.length * 100 : 0)}
-      <small>Tick a bill to record it as a transaction; untick to remove it. <b>Auto</b> bills are added for you on their due day.</small></div>
-    <div class="list" style="margin-top:12px">${bills.map(row).join('') || empty('Add rent, editor payments, family support, subscriptions…', '<button class="primary" data-act="edit-bill">+ New bill</button>')}</div>
-    ${off.length ? `<h2 class="muted" style="font-size:14px">Paused</h2><div class="list">${off.map(b => `<div class="item done"><div class="main"><b>${esc(b.name)}</b></div><button class="sm ghost" data-act="edit-bill" data-id="${b.id}">Edit</button></div>`).join('')}</div>` : ''}`;
+  const bills = [...S.bills].sort((a, b) => a.day_of_month - b.day_of_month);
+  const paid = bills.filter(b => billTx(b)).length;
+  const toPay = bills.filter(b => !billTx(b)).reduce((s, b) => s + num(b.amount) * rate(b.currency), 0);
+  return `<h2>Bills for ${monthName(S.month, { month: 'long' })} <button type="button" data-act="edit-bill">Add bill</button></h2>
+    ${bills.length ? `<p class="quiet">${paid} of ${bills.length} paid${toPay ? `, ${money(toPay)} still to pay` : ''}. Tick a bill when you pay it and it's added to your spending.</p>` : ''}
+    <div class="group">${bills.map(billRow).join('') || empty('Add the things you pay every month, like rent, editors or subscriptions.', 'edit-bill', 'Add bill')}</div>`;
 };
 
 V.goals = () => {
-  const card = g => {
+  const goal = g => {
     const p = num(g.target) ? num(g.saved) / num(g.target) * 100 : 0, left = Math.max(num(g.target) - num(g.saved), 0);
-    let plan = '';
-    if (g.deadline && left > 0) {
+    let plan = left ? `${money(left)} to go` : 'Reached';
+    if (g.deadline && left) {
       const now = new Date(), dl = new Date(g.deadline + 'T00:00');
-      const months = Math.max((dl.getFullYear() - now.getFullYear()) * 12 + dl.getMonth() - now.getMonth(), 1);
-      plan = dl < now ? '<span class="neg">Deadline passed</span>' : `Save <b>${money(left / months, g.currency)}</b>/month for ${months} month${months > 1 ? 's' : ''}`;
+      const m = Math.max((dl.getFullYear() - now.getFullYear()) * 12 + dl.getMonth() - now.getMonth(), 1);
+      plan = dl < now ? `${money(left)} to go, deadline passed` : `Save ${money(left / m)} a month to reach it by ${dayName(g.deadline)}`;
     }
-    return `<div class="card">
-      <div class="row"><span class="ico" style="background:${esc(g.color)}22;color:${esc(g.color)}">★</span><div class="grow"><b>${esc(g.name)}</b><br><small>${g.deadline ? 'By ' + new Date(g.deadline + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'No deadline'}</small></div>
-      <b class="num">${p.toFixed(0)}%</b></div>
-      <div class="bar"><i style="width:${Math.min(p, 100)}%;background:${esc(g.color)}"></i></div>
-      <div class="split"><span>${money(num(g.saved), g.currency)} saved</span><span>${p >= 100 ? '<span class="pos">Reached 🎉</span>' : `${money(left, g.currency)} to go`}</span></div>
-      ${plan ? `<p class="hint" style="margin:10px 0 0">${plan}</p>` : ''}
-      <div class="row" style="margin-top:12px"><button class="sm primary" data-act="goal-add" data-id="${g.id}">+ Add money</button><button class="sm" data-act="goal-add" data-id="${g.id}" data-neg="1">Withdraw</button><button class="sm ghost" data-act="edit-goal" data-id="${g.id}" style="margin-left:auto">Edit</button></div></div>`;
+    return `<div class="row"><span class="main tap" data-act="edit-goal" data-id="${g.id}" style="cursor:pointer"><b>${esc(g.name)}</b>
+      <small class="wrap">${money(num(g.saved))} of ${money(num(g.target))}. ${plan}</small>${bar(p)}</span>
+      <button type="button" class="btn small" data-act="goal-add" data-id="${g.id}">Add</button></div>`;
   };
-  const total = S.goals.reduce((s, g) => s + num(g.saved) * rate(g.currency), 0);
-  return `<div class="head"><h2>Savings goals</h2><button class="primary" data-act="edit-goal">+ New goal</button></div>
-    ${S.goals.length ? `<p class="muted" style="margin-top:-4px">Saved across all goals: <b class="pos">${money(total)}</b></p><div class="cards">${S.goals.map(card).join('')}</div>` : empty('Create a goal — a new camera, an emergency fund, a trip…', '<button class="primary" data-act="edit-goal">+ New goal</button>')}`;
-};
-
-V.debts = () => {
-  const open = S.debts.filter(d => debtLeft(d) > 0), done = S.debts.filter(d => debtLeft(d) <= 0);
-  const sum = dir => open.filter(d => d.direction === dir).reduce((s, d) => s + debtLeft(d) * rate(d.currency), 0);
-  const row = d => {
-    const left = debtLeft(d), late = left > 0 && d.due && d.due < today();
-    return `<div class="item ${left <= 0 ? 'done' : ''}">
-      <span class="ico" style="background:var(--panel2)">${d.direction === 'owed_to_me' ? '↙' : '↗'}</span>
-      <div class="main"><b>${esc(d.person)}${late ? '<span class="badge red">Overdue</span>' : ''}</b><small>${esc(d.note || (d.direction === 'owed_to_me' ? 'Owes you' : 'You owe'))}${d.due ? ' · due ' + niceDate(d.due) : ''}${num(d.paid) ? ` · ${money(num(d.paid), d.currency)} of ${money(num(d.amount), d.currency)} paid` : ''}</small></div>
-      <div class="amt ${d.direction === 'owed_to_me' ? 'pos' : 'neg'}">${left > 0 ? money(left, d.currency) : 'Settled'}</div>
-      <div class="btns">${left > 0 ? `<button class="sm" data-act="debt-pay" data-id="${d.id}">Payment</button>` : ''}<button class="sm ghost" data-act="edit-debt" data-id="${d.id}">Edit</button></div></div>`;
+  const debt = d => {
+    const left = owedLeft(d), mine = d.direction === 'owed_to_me', late = left && d.due && d.due < today();
+    return `<div class="row ${left ? '' : 'done'}"><span class="main tap" data-act="edit-debt" data-id="${d.id}" style="cursor:pointer"><b>${esc(d.person)}</b>
+      <small>${left ? (mine ? 'Owes you' : 'You owe') : 'Paid back'}${d.note ? `, ${esc(d.note)}` : ''}${late ? ', <span class="out">overdue</span>' : d.due && left ? `, due ${dayName(d.due)}` : ''}</small></span>
+      <span class="amt ${left ? (mine ? 'in' : 'out') : ''}">${money(left || num(d.amount))}</span>
+      ${left ? `<button type="button" class="btn small" data-act="debt-pay" data-id="${d.id}">Paid</button>` : ''}</div>`;
   };
-  const owed = open.filter(d => d.direction === 'owed_to_me'), owe = open.filter(d => d.direction === 'i_owe');
-  return `<div class="head"><h2>Debts & loans</h2><button class="primary" data-act="edit-debt">+ New</button></div>
-    <div class="grid2" style="margin-top:0">${stat('People owe you', money(sum('owed_to_me')), `${owed.length} open`, 'pos')}${stat('You owe', money(sum('i_owe')), `${owe.length} open`, 'neg')}</div>
-    <div class="grid2">
-      <div><h2 style="font-size:14px">Owed to you</h2><div class="list">${owed.map(row).join('') || empty('Nobody owes you.')}</div></div>
-      <div><h2 style="font-size:14px">You owe</h2><div class="list">${owe.map(row).join('') || empty('You don\'t owe anyone.')}</div></div>
-    </div>
-    ${done.length ? `<h2 class="muted" style="font-size:14px">Settled</h2><div class="list">${done.map(row).join('')}</div>` : ''}`;
+  const debts = [...S.debts].sort((a, b) => !owedLeft(a) - !owedLeft(b));
+  return `<h2>Savings goals <button type="button" data-act="edit-goal">Add goal</button></h2>
+    <div class="group">${S.goals.map(goal).join('') || empty('Saving for a camera, a trip or an emergency fund? Add it here.', 'edit-goal', 'Add goal')}</div>
+    <h2>Money owed <button type="button" data-act="edit-debt">Add</button></h2>
+    <div class="group">${debts.map(debt).join('') || empty('Keep track of money you lent or borrowed.', 'edit-debt', 'Add')}</div>`;
 };
 
 V.settings = () => {
-  const ov = overrides();
-  const curs = [...new Set([...S.accounts.map(a => a.currency), 'USD', 'EUR', ...Object.keys(ov), ...(S.settings.currencies || []), ...S.goals.map(g => g.currency), ...S.debts.map(d => d.currency), ...S.bills.map(b => b.currency)])].filter(c => c !== BASE);
-  const theme = document.documentElement.dataset.theme;
-  return `<div class="head"><h2>Exchange rates</h2><button data-act="refresh-rates">↻ Refresh live rates</button></div>
-    <div class="card"><table><thead><tr><th>Currency</th><th>Live (official)</th><th>Your rate</th><th class="hide-sm">Using</th></tr></thead><tbody>
-      ${curs.map(c => `<tr><td><b>1 ${c}</b> =</td><td class="num muted">${liveRate(c) ? 'Br ' + liveRate(c).toFixed(2) : '—'}</td>
-        <td><input type="number" min="0" step="any" placeholder="${liveRate(c) ? liveRate(c).toFixed(2) : 'Set rate'}" value="${ov[c] ?? ''}" data-rate="${c}"></td>
-        <td class="hide-sm">${ov[c] ? '<span class="badge green">Custom</span>' : liveRate(c) ? '<span class="badge">Live</span>' : '<span class="badge red">Missing</span>'}</td></tr>`).join('')}
-    </tbody></table>
-    <div class="row wrapit" style="margin-top:12px"><select id="add-cur" style="max-width:140px">${CURRENCIES.filter(c => c !== BASE && !curs.includes(c)).map(c => `<option>${c}</option>`).join('')}</select><button class="sm" data-act="add-cur">Add currency</button></div>
-    <p class="hint" style="margin-top:12px">Live rates ${S.liveAt ? 'updated ' + new Date(S.liveAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : 'unavailable'}. Leave "Your rate" empty to use the live rate. Each transaction keeps the rate it was saved with, so changing a rate here doesn't rewrite past months.</p></div>
+  const ov = overrides(), dark = document.documentElement.dataset.theme === 'dark';
+  const unused = ALL_CURRENCIES.filter(c => !currencies().includes(c));
+  return `<h2>Exchange rates <button type="button" data-act="refresh-rates">Refresh</button></h2>
+    <div class="group">${currencies().filter(c => c !== BASE).map(c => `<div class="row"><span class="main"><b>1 ${c} in Birr</b>
+        <small>${liveRate(c) ? `Official rate ${liveRate(c).toFixed(2)}` : 'No official rate'}${ov[c] ? ', using yours' : ''}</small></span>
+        <input style="max-width:120px" type="number" min="0" step="any" inputmode="decimal" placeholder="${liveRate(c) ? liveRate(c).toFixed(2) : 'Rate'}" value="${ov[c] ?? ''}" data-rate="${c}" aria-label="Your ${c} rate"></div>`).join('')}
+      ${unused.length ? `<div class="row"><select id="new-cur" aria-label="Currency">${unused.map(c => `<option>${c}</option>`).join('')}</select><button type="button" class="btn small" data-act="add-cur">Add currency</button></div>` : ''}</div>
+    <p class="quiet" style="font-size:14px">Type your own rate to use it instead of the official one. Leave it empty to use the official rate. Saved entries keep the rate they were added with.</p>
 
-    <div class="head"><h2>Accounts</h2><button class="primary" data-act="edit-acc">+ New account</button></div>
-    <div class="list">${S.accounts.map(a => { const b = balance(a); return `<div class="item ${a.archived ? 'done' : ''}"><span class="dot" style="background:${esc(a.color)}"></span><div class="main"><b>${esc(a.name)}</b><small>${a.currency}${a.archived ? ' · hidden' : ''}</small></div><div class="amt">${money(b, a.currency)}${a.currency !== BASE ? `<small class="muted">≈ ${money(b * rate(a.currency))}</small>` : ''}</div><button class="sm ghost" data-act="edit-acc" data-id="${a.id}">Edit</button></div>`; }).join('')}</div>
+    <h2>Categories <button type="button" data-act="edit-cat">Add category</button></h2>
+    <div class="group">${S.categories.map(c => `<button type="button" class="row" data-act="edit-cat" data-id="${c.id}">${emoji(c)}<span class="main"><b>${esc(c.name)}</b><small>${c.kind === 'income' ? 'Money in' : 'Spending'}${num(c.budget) ? `, limit ${money(num(c.budget))}` : ''}</small></span></button>`).join('')}</div>
 
-    <div class="head"><h2>Categories</h2><button class="primary" data-act="edit-cat">+ New category</button></div>
-    <div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${S.categories.map(c => `<div class="item click" data-act="edit-cat" data-id="${c.id}">${catIcon(c)}<div class="main"><b>${esc(c.name)}</b><small>${c.kind}</small></div></div>`).join('')}</div>
-
-    <div class="head"><h2>General</h2></div>
-    <div class="card"><div class="row wrapit">
-      <label style="width:180px">Savings target (%)<input type="number" min="0" max="100" value="${num(S.settings.savings_pct ?? 20)}" data-setting="savings_pct"></label>
-      <label style="width:180px">Theme<select data-theme-sel><option value="dark" ${theme === 'dark' ? 'selected' : ''}>Dark</option><option value="light" ${theme === 'light' ? 'selected' : ''}>Light</option></select></label>
-      <div class="grow"></div><button data-act="export">Export all transactions (CSV)</button></div></div>`;
+    <h2>Preferences</h2>
+    <div class="group">
+      <div class="row"><span class="main"><b>Savings goal</b><small>Share of what you earn you want to keep</small></span><input style="max-width:90px" type="number" min="0" max="100" value="${num(S.settings.savings_pct ?? 20)}" data-setting="savings_pct" aria-label="Savings goal percent"><span class="quiet">%</span></div>
+      <label class="row toggle"><span>Dark mode</span><input type="checkbox" data-theme-toggle ${dark ? 'checked' : ''}></label>
+      <div class="row"><span class="main"><b>Download your data</b><small>Every entry as a spreadsheet (CSV)</small></span><button type="button" class="btn small" data-act="export">Download</button></div>
+    </div>`;
 };
 
 /* ---------- forms ---------- */
 const dlg = $('#modal'), form = $('#modal-form');
 let onSave = null, onDelete = null;
-function openForm(html, save, del) {
-  form.innerHTML = `${html}<div class="actions">${del ? '<button type="button" class="danger" data-act="del">Delete</button>' : ''}<button type="button" value="cancel" data-act="close">Cancel</button><button class="primary" value="ok">Save</button></div>`;
+function openForm(html, save, del, saveLabel = 'Save') {
+  form.innerHTML = `${html}<div class="actions">${del ? '<button type="button" class="btn danger" data-act="del">Delete</button>' : ''}<button type="button" class="btn" data-act="close">Cancel</button><button class="btn solid">${saveLabel}</button></div>`;
   onSave = save; onDelete = del; form.oninput = null; dlg.showModal();
-  form.querySelector('input:not([type=radio]):not([type=hidden])')?.focus();
+  form.querySelector('input[type=number], input:not([type=radio]):not([type=checkbox])')?.focus();
 }
 form.addEventListener('submit', async e => {
   e.preventDefault();
-  const fd = Object.fromEntries(new FormData(form));
-  const btn = form.querySelector('.primary'); btn.disabled = true;
-  if (await run(() => onSave(fd), 'Saved')) dlg.close();
+  const btn = form.querySelector('.solid'); btn.disabled = true;
+  if (await run(() => onSave(Object.fromEntries(new FormData(form))), 'Saved')) dlg.close();
   btn.disabled = false;
 });
+const seg = (name, opts, sel) => `<div class="seg">${opts.map(([v, l]) => `<input type="radio" name="${name}" id="${name}-${v}" value="${v}" ${v === sel ? 'checked' : ''}><label for="${name}-${v}">${l}</label>`).join('')}</div>`;
+const curSelect = sel => `<select name="currency" aria-label="Currency">${currencies().map(c => `<option ${c === sel ? 'selected' : ''}>${c}</option>`).join('')}</select>`;
 
 function txForm(t = {}) {
-  const kind = t.kind || 'expense';
-  const accs = S.accounts.filter(a => !a.archived || a.id === t.account_id || a.id === t.to_account_id);
-  const accId = t.account_id || accs[0]?.id;
-  openForm(`<h3>${t.id ? 'Edit' : 'New'} transaction</h3>
-    <div class="seg">${['expense', 'income', 'transfer'].map(k => `<input type="radio" name="kind" id="k-${k}" value="${k}" ${k === kind ? 'checked' : ''}><label for="k-${k}">${k[0].toUpperCase() + k.slice(1)}</label>`).join('')}</div>
-    <div class="two"><label><span>Amount <span id="cur-lbl"></span></span><input name="amount" type="number" step="any" min="0" required value="${t.amount ?? ''}" inputmode="decimal"></label>
-      <label>Date<input name="date" type="date" required value="${t.date || (inMonth({ date: today() }) ? today() : S.month + '-01')}"></label></div>
-    <div class="two"><label><span id="acc-lbl">Account</span><select name="account_id" required>${opts(accs, accId, a => `${a.name} (${a.currency})`)}</select></label>
-      <label data-for="cat">Category<select name="category_id"></select></label>
-      <label data-for="transfer">To account<select name="to_account_id">${opts(accs, t.to_account_id || accs.find(a => a.id !== accId)?.id, a => `${a.name} (${a.currency})`)}</select></label></div>
-    <label data-for="toamt"><span>Amount received <span id="to-cur"></span></span><input name="to_amount" type="number" step="any" min="0" value="${t.to_amount ?? ''}"></label>
-    <label data-for="rate"><span>Rate: 1 <span id="rate-cur"></span> = ? Br</span><input name="rate" type="number" step="any" min="0" value="${t.rate ?? ''}"></label>
-    <p class="hint" data-for="rate" id="rate-hint"></p>
-    <label>Note<input name="note" maxlength="200" value="${esc(t.note || '')}" placeholder="e.g. Editor payment, groceries…"></label>`,
+  const lastCur = localStorage.getItem('pocket.cur') || BASE;
+  openForm(`<h3>${t.id ? 'Edit entry' : 'Add money in or out'}</h3>
+    ${seg('kind', [['expense', 'Spent'], ['income', 'Earned']], t.kind || 'expense')}
+    <div class="amount"><input name="amount" type="number" step="any" min="0" required inputmode="decimal" placeholder="0" value="${t.amount ?? ''}" aria-label="Amount">${curSelect(t.currency || (currencies().includes(lastCur) ? lastCur : BASE))}</div>
+    <label data-rate>Rate in Birr<input name="rate" type="number" step="any" min="0" inputmode="decimal" value="${t.rate && t.currency !== BASE ? t.rate : ''}"></label>
+    <p class="hint" data-rate id="rate-hint"></p>
+    <div class="chips" id="cats" role="radiogroup" aria-label="Category"></div>
+    <div class="pair"><label>Date<input name="date" type="date" required value="${t.date || (isThisMonth() ? today() : S.month + '-01')}"></label>
+      <label>Note<input name="note" maxlength="120" value="${esc(t.note || '')}" placeholder="Optional"></label></div>`,
     async fd => {
-      const cur = accCur(fd.account_id);
-      if (fd.kind === 'transfer' && fd.account_id === fd.to_account_id) throw new Error('Pick two different accounts');
-      const row = {
-        kind: fd.kind, amount: num(fd.amount), date: fd.date, note: fd.note.trim(), account_id: fd.account_id || null, currency: cur,
-        rate: cur === BASE ? 1 : num(fd.rate) || rate(cur),
-        category_id: fd.kind === 'transfer' ? null : fd.category_id || null,
-        to_account_id: fd.kind === 'transfer' ? fd.to_account_id : null,
-        to_amount: fd.kind === 'transfer' ? (fd.to_amount ? num(fd.to_amount) : num(fd.amount) * rate(cur) / rate(accCur(fd.to_account_id))) : null,
-      };
+      const cur = fd.currency;
+      const row = { kind: fd.kind, amount: num(fd.amount), currency: cur, rate: cur === BASE ? 1 : num(fd.rate) || rate(cur), date: fd.date, note: fd.note.trim(), category_id: fd.category_id || null };
       const saved = t.id ? await db.update('transactions', t.id, row) : await db.insert('transactions', row);
+      localStorage.setItem('pocket.cur', cur);
       S.tx = [saved, ...S.tx.filter(x => x.id !== saved.id)].sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at));
     },
     t.id && (async () => { await db.remove('transactions', t.id); S.tx = S.tx.filter(x => x.id !== t.id); }));
-  let lastKind = null;
+  let lastKind;
   const sync = () => {
-    const k = form.kind.value, cur = accCur(form.account_id.value), toCur = accCur(form.to_account_id.value);
-    if (k !== lastKind && k !== 'transfer') {
-      const keep = form.category_id.value || t.category_id;
-      form.category_id.innerHTML = `<option value="">Uncategorized</option>` + opts(S.categories.filter(c => c.kind === k), keep, c => `${c.icon} ${c.name}`);
+    const k = form.kind.value, cur = form.currency.value;
+    if (k !== lastKind) {
+      const sel = form.category_id?.value || t.category_id;
+      $('#cats').innerHTML = S.categories.filter(c => c.kind === k).map(c => `<input type="radio" name="category_id" id="c-${c.id}" value="${c.id}" ${c.id === sel ? 'checked' : ''}><label for="c-${c.id}">${esc(c.icon)} ${esc(c.name)}</label>`).join('');
+      lastKind = k;
     }
-    lastKind = k;
-    const show = (sel, on) => form.querySelectorAll(`[data-for="${sel}"]`).forEach(el => (el.hidden = !on));
-    show('cat', k !== 'transfer'); show('transfer', k === 'transfer');
-    show('toamt', k === 'transfer' && cur !== toCur); show('rate', cur !== BASE);
-    $('#acc-lbl').textContent = k === 'transfer' ? 'From account' : 'Account';
-    $('#cur-lbl').textContent = `(${cur})`; $('#rate-cur').textContent = cur; $('#to-cur').textContent = `(${toCur})`;
+    form.querySelectorAll('[data-rate]').forEach(el => (el.hidden = cur === BASE));
     if (cur !== BASE) {
       form.rate.placeholder = rate(cur);
-      $('#rate-hint').textContent = `Using ${overrides()[cur] ? 'your custom' : 'the live'} rate ${rate(cur)} if left empty${form.amount.value ? ` → ${money(num(form.amount.value) * (num(form.rate.value) || rate(cur)))}` : ''}.`;
+      const r = num(form.rate.value) || rate(cur);
+      $('#rate-hint').textContent = `${form.rate.value ? 'Using this rate' : overrides()[cur] ? 'Using your rate' : 'Using the official rate'}${form.amount.value ? `, that's ${money(num(form.amount.value) * r)}` : ''}.`;
     }
-    form.to_amount.placeholder = (num(form.amount.value) * rate(cur) / rate(toCur)).toFixed(2);
   };
   form.oninput = sync; sync();
 }
 
-function simpleForm(title, fields, item, table, listKey, extraDel = true) {
-  openForm(`<h3>${item?.id ? 'Edit' : 'New'} ${title}</h3>${fields}`,
-    async fd => {
-      const row = {};
-      for (const [k, v] of Object.entries(fd)) row[k] = v === '' && form.elements[k]?.type !== 'text' ? null : v;
-      form.querySelectorAll('input[type=checkbox][name]').forEach(cb => (row[cb.name] = cb.checked));
-      form.querySelectorAll('input[type=number][name]').forEach(n => (row[n.name] = n.value === '' ? null : num(n.value)));
-      const saved = item?.id ? await db.update(table, item.id, row) : await db.insert(table, row);
-      S[listKey] = item?.id ? S[listKey].map(x => (x.id === saved.id ? saved : x)) : [...S[listKey], saved];
-    },
-    item?.id && extraDel && (async () => { await db.remove(table, item.id); S[listKey] = S[listKey].filter(x => x.id !== item.id); }));
+function simpleForm(title, html, item, table, key) {
+  openForm(`<h3>${title}</h3>${html}`, async fd => {
+    const row = {};
+    for (const [k, v] of Object.entries(fd)) row[k] = v === '' && form.elements[k]?.type !== 'text' ? null : v;
+    form.querySelectorAll('input[type=checkbox][name]').forEach(cb => (row[cb.name] = cb.checked));
+    form.querySelectorAll('input[type=number][name]').forEach(n => (row[n.name] = n.value === '' ? null : num(n.value)));
+    const saved = item.id ? await db.update(table, item.id, row) : await db.insert(table, row);
+    S[key] = item.id ? S[key].map(x => (x.id === saved.id ? saved : x)) : [...S[key], saved];
+  }, item.id && (async () => { await db.remove(table, item.id); S[key] = S[key].filter(x => x.id !== item.id); }));
 }
 
-const billForm = (b = {}) => {
-  simpleForm('bill', `
-    <div class="seg"><input type="radio" name="kind" id="bk-e" value="expense" ${b.kind !== 'income' ? 'checked' : ''}><label for="bk-e">Bill / payment</label><input type="radio" name="kind" id="bk-i" value="income" ${b.kind === 'income' ? 'checked' : ''}><label for="bk-i">Recurring income</label></div>
-    <label>Name<input name="name" required maxlength="80" value="${esc(b.name || '')}" placeholder="e.g. Rent, Editor salary, Netflix"></label>
-    <div class="two"><label>Amount<input name="amount" type="number" step="any" min="0" required value="${b.amount ?? ''}"></label>
-      <label>Day of month<input name="day_of_month" type="number" min="1" max="31" required value="${b.day_of_month ?? 1}"></label></div>
-    <div class="two"><label>Account<select name="account_id" required>${opts(S.accounts.filter(a => !a.archived || a.id === b.account_id), b.account_id, a => `${a.name} (${a.currency})`)}</select></label>
-      <label>Category<select name="category_id"><option value="">Uncategorized</option>${opts(S.categories, b.category_id, c => `${c.icon} ${c.name}`)}</select></label></div>
-    <label class="check"><input type="checkbox" name="auto_add" ${b.auto_add ? 'checked' : ''}> Add automatically on the due day (recurring)</label>
-    <label class="check"><input type="checkbox" name="active" ${b.active !== false ? 'checked' : ''}> Active</label>`, b, 'bills', 'bills');
-  const prevSave = onSave;
-  onSave = fd => prevSave({ ...fd, currency: accCur(fd.account_id) });
-};
-const goalForm = (g = {}) => simpleForm('goal', `
-    <label>Name<input name="name" required maxlength="80" value="${esc(g.name || '')}" placeholder="e.g. New camera, Emergency fund"></label>
-    <div class="two"><label>Target<input name="target" type="number" step="any" min="0" required value="${g.target ?? ''}"></label>
-      <label>Currency<select name="currency">${curOpts(g.currency || BASE)}</select></label></div>
-    <div class="two"><label>Already saved<input name="saved" type="number" step="any" min="0" value="${g.saved ?? 0}"></label>
-      <label>Deadline (optional)<input name="deadline" type="date" value="${g.deadline || ''}"></label></div>
-    <label>Color<input name="color" type="color" value="${g.color || '#60a5fa'}"></label>`, g, 'goals', 'goals');
-const debtForm = (d = {}) => simpleForm('debt', `
-    <div class="seg"><input type="radio" name="direction" id="d-o" value="owed_to_me" ${d.direction !== 'i_owe' ? 'checked' : ''}><label for="d-o">They owe me</label><input type="radio" name="direction" id="d-i" value="i_owe" ${d.direction === 'i_owe' ? 'checked' : ''}><label for="d-i">I owe them</label></div>
-    <label>Person<input name="person" required maxlength="80" value="${esc(d.person || '')}"></label>
-    <div class="two"><label>Amount<input name="amount" type="number" step="any" min="0" required value="${d.amount ?? ''}"></label>
-      <label>Currency<select name="currency">${curOpts(d.currency || BASE)}</select></label></div>
-    <div class="two"><label>Already paid<input name="paid" type="number" step="any" min="0" value="${d.paid ?? 0}"></label>
-      <label>Due (optional)<input name="due" type="date" value="${d.due || ''}"></label></div>
-    <label>Note<input name="note" maxlength="200" value="${esc(d.note || '')}"></label>`, d, 'debts', 'debts');
-const accForm = (a = {}) => {
-  const used = a.id && S.tx.some(t => t.account_id === a.id || t.to_account_id === a.id);
-  simpleForm('account', `
-    <label>Name<input name="name" required maxlength="60" value="${esc(a.name || '')}" placeholder="e.g. Telebirr, CBE, PayPal"></label>
-    <div class="two"><label>Currency<select name="currency" ${used ? 'disabled' : ''}>${curOpts(a.currency || BASE)}</select></label>
-      <label>Starting balance<input name="opening_balance" type="number" step="any" value="${a.opening_balance ?? 0}"></label></div>
-    ${used ? '<p class="hint">Currency is locked because this account has transactions.</p>' : ''}
-    <label>Color<input name="color" type="color" value="${a.color || '#2dd4a7'}"></label>
-    <label class="check"><input type="checkbox" name="archived" ${a.archived ? 'checked' : ''}> Hide from overview & forms</label>`, a, 'accounts', 'accounts', !used);
-};
-const catForm = (c = {}) => simpleForm('category', `
-    <div class="seg"><input type="radio" name="kind" id="c-e" value="expense" ${c.kind !== 'income' ? 'checked' : ''}><label for="c-e">Expense</label><input type="radio" name="kind" id="c-i" value="income" ${c.kind === 'income' ? 'checked' : ''}><label for="c-i">Income</label></div>
-    <div class="two"><label>Name<input name="name" required maxlength="40" value="${esc(c.name || '')}"></label>
-      <label>Icon (emoji)<input name="icon" maxlength="4" value="${esc(c.icon || '•')}"></label></div>
-    <label>Color<input name="color" type="color" value="${c.color || '#94a3b8'}"></label>`, c, 'categories', 'categories');
+const billForm = (b = {}) => simpleForm(b.id ? 'Edit bill' : 'Add a monthly bill', `
+  <label>Name<input name="name" required maxlength="60" value="${esc(b.name || '')}" placeholder="Rent, editor, Netflix…"></label>
+  <div class="amount"><input name="amount" type="number" step="any" min="0" required inputmode="decimal" placeholder="0" value="${b.amount ?? ''}" aria-label="Amount">${curSelect(b.currency || BASE)}</div>
+  <div class="pair"><label>Due on day<input name="day_of_month" type="number" min="1" max="31" required value="${b.day_of_month ?? 1}"></label>
+    <label>Category<select name="category_id"><option value="">None</option>${S.categories.filter(c => c.kind === 'expense').map(c => `<option value="${c.id}" ${c.id === b.category_id ? 'selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('')}</select></label></div>
+  <label class="toggle"><span>Add it to my spending automatically on the due day</span><input type="checkbox" name="auto_add" ${b.auto_add ? 'checked' : ''}></label>`, b, 'bills', 'bills');
 
-function amountPrompt(title, max, cb) {
-  openForm(`<h3>${esc(title)}</h3><label>Amount<input name="v" type="number" step="any" min="0" required ${max ? `max="${max}"` : ''}></label>`, fd => cb(num(fd.v)));
+const goalForm = (g = {}) => simpleForm(g.id ? 'Edit goal' : 'New savings goal', `
+  <label>What are you saving for?<input name="name" required maxlength="60" value="${esc(g.name || '')}" placeholder="New camera"></label>
+  <div class="pair"><label>Target (Br)<input name="target" type="number" step="any" min="0" required value="${g.target ?? ''}"></label>
+    <label>Saved so far (Br)<input name="saved" type="number" step="any" min="0" value="${g.saved ?? 0}"></label></div>
+  <label>Reach it by (optional)<input name="deadline" type="date" value="${g.deadline || ''}"></label>`, g, 'goals', 'goals');
+
+const debtForm = (d = {}) => simpleForm(d.id ? 'Edit' : 'Money owed', `
+  ${seg('direction', [['owed_to_me', 'They owe me'], ['i_owe', 'I owe them']], d.direction || 'owed_to_me')}
+  <label>Person<input name="person" required maxlength="60" value="${esc(d.person || '')}"></label>
+  <div class="pair"><label>Amount (Br)<input name="amount" type="number" step="any" min="0" required value="${d.amount ?? ''}"></label>
+    <label>Paid back so far<input name="paid" type="number" step="any" min="0" value="${d.paid ?? 0}"></label></div>
+  <div class="pair"><label>Due (optional)<input name="due" type="date" value="${d.due || ''}"></label>
+    <label>Note<input name="note" maxlength="80" value="${esc(d.note || '')}" placeholder="Optional"></label></div>`, d, 'debts', 'debts');
+
+const catForm = (c = {}) => simpleForm(c.id ? 'Edit category' : 'New category', `
+  ${seg('kind', [['expense', 'Spending'], ['income', 'Money in']], c.kind || 'expense')}
+  <div class="amount" style="grid-template-columns:72px 1fr"><input name="icon" maxlength="4" value="${esc(c.icon || '•')}" aria-label="Emoji" style="text-align:center;font-size:22px"><input name="name" required maxlength="30" value="${esc(c.name || '')}" placeholder="Name" aria-label="Name"></div>
+  <label>Monthly limit in Birr (spending only, optional)<input name="budget" type="number" step="any" min="0" value="${c.budget ?? ''}"></label>`, c, 'categories', 'categories');
+
+function budgetForm(c) {
+  if (!c) return;
+  const avg = [1, 2, 3].reduce((s, i) => s + (spendByCat(addMonth(S.month, -i)).get(c.id) || 0), 0) / 3;
+  openForm(`<h3>${esc(c.icon)} ${esc(c.name)}</h3>
+    <label>Monthly limit in Birr<input name="budget" type="number" step="any" min="0" value="${c.budget ?? ''}" placeholder="No limit"></label>
+    <p class="hint">${avg ? `You spent about ${money(avg)} a month here over the last 3 months. ` : ''}Leave it empty for no limit.</p>`,
+    async fd => { const saved = await db.update('categories', c.id, { budget: fd.budget === '' ? null : num(fd.budget) }); S.categories = S.categories.map(x => (x.id === c.id ? saved : x)); });
+}
+function amountForm(title, max, cb, label) {
+  openForm(`<h3>${esc(title)}</h3><label>Amount (Br)<input name="v" type="number" step="any" min="0" required ${max ? `max="${max}"` : ''} inputmode="decimal"></label>`, fd => cb(num(fd.v)), null, label);
 }
 
 /* ---------- actions ---------- */
 const actions = {
-  'add-tx': () => txForm(),
+  add: () => txForm(),
   'edit-tx': el => txForm(byId(S.tx, el.dataset.id)),
   month: el => { S.month = +el.dataset.d ? addMonth(S.month, +el.dataset.d) : today().slice(0, 7); render(); },
+  kind: el => { S.kind = el.dataset.k; render(); },
   close: () => dlg.close(),
-  del: async () => { if (onDelete && confirm('Delete this permanently?') && await run(onDelete, 'Deleted')) dlg.close(); },
+  del: async () => { if (onDelete && confirm('Delete this? This can’t be undone.') && await run(onDelete, 'Deleted')) dlg.close(); },
   'edit-bill': el => billForm(byId(S.bills, el.dataset.id)),
   'edit-goal': el => goalForm(byId(S.goals, el.dataset.id)),
   'edit-debt': el => debtForm(byId(S.debts, el.dataset.id)),
-  'edit-acc': el => accForm(byId(S.accounts, el.dataset.id)),
   'edit-cat': el => catForm(byId(S.categories, el.dataset.id)),
-  'toggle-bill': el => toggleBill(byId(S.bills, el.dataset.id)),
+  budget: el => budgetForm(cat(el.dataset.id)),
+  'pay-bill': el => payBill(byId(S.bills, el.dataset.id)),
   'goal-add': el => {
-    const g = byId(S.goals, el.dataset.id), neg = !!el.dataset.neg;
-    amountPrompt(`${neg ? 'Withdraw from' : 'Add to'} “${g.name}” (${g.currency})`, neg ? g.saved : 0, async v => {
-      const saved = await db.update('goals', g.id, { saved: Math.max(num(g.saved) + (neg ? -v : v), 0) });
+    const g = byId(S.goals, el.dataset.id);
+    amountForm(`Add to ${g.name}`, 0, async v => {
+      const saved = await db.update('goals', g.id, { saved: num(g.saved) + v });
       S.goals = S.goals.map(x => (x.id === g.id ? saved : x));
-    });
+    }, 'Add');
   },
   'debt-pay': el => {
     const d = byId(S.debts, el.dataset.id);
-    amountPrompt(`Payment ${d.direction === 'owed_to_me' ? 'from' : 'to'} ${d.person} (${d.currency})`, debtLeft(d), async v => {
+    amountForm(`How much did ${d.direction === 'owed_to_me' ? `${d.person} pay you` : `you pay ${d.person}`}?`, owedLeft(d), async v => {
       const saved = await db.update('debts', d.id, { paid: num(d.paid) + v });
       S.debts = S.debts.map(x => (x.id === d.id ? saved : x));
-    });
+    }, 'Record payment');
   },
-  'use-avg': el => saveBudget(el.dataset.id, el.dataset.v),
-  'refresh-rates': async () => { await loadLive(true); render(); toast('Rates updated'); },
-  'add-cur': () => { const c = $('#add-cur').value; if (c) addCurrency(c); },
+  'refresh-rates': async () => { await loadLive(true); render(); toast('Rates refreshed'); },
+  'add-cur': () => {
+    const c = $('#new-cur').value, list = [...new Set([...(S.settings.currencies || []), c])];
+    run(async () => { await db.setting('currencies', list); S.settings.currencies = list; }, `${c} added`);
+  },
   export: exportCsv,
 };
 
-async function toggleBill(b) {
+const billToTx = (b, date) => ({ kind: 'expense', amount: num(b.amount), currency: b.currency, rate: rate(b.currency), date, note: b.name, category_id: b.category_id, bill_id: b.id });
+function payBill(b) {
   const t = billTx(b);
-  if (t) return run(async () => { await db.remove('transactions', t.id); S.tx = S.tx.filter(x => x.id !== t.id); }, 'Unmarked');
-  const date = S.month === today().slice(0, 7) ? today() : dueDate(b);
-  await run(async () => { S.tx.unshift(await db.insert('transactions', billToTx(b, date))); S.tx.sort((a, b) => b.date.localeCompare(a.date)); }, `${b.name} recorded`);
+  if (t) return run(async () => { await db.remove('transactions', t.id); S.tx = S.tx.filter(x => x.id !== t.id); }, `${b.name} marked unpaid`);
+  return run(async () => { S.tx.unshift(await db.insert('transactions', billToTx(b, isThisMonth() ? today() : dueDate(b)))); S.tx.sort((a, c) => c.date.localeCompare(a.date)); }, `${b.name} paid`);
 }
-const billToTx = (b, date) => ({
-  kind: b.kind, amount: num(b.amount), currency: b.currency, rate: rate(b.currency), date, note: b.name,
-  account_id: b.account_id, category_id: b.category_id, bill_id: b.id,
-});
 async function autoBills() {
   const ym = today().slice(0, 7), d = +today().slice(8);
-  const due = S.bills.filter(b => b.active && b.auto_add && Math.min(b.day_of_month, daysIn(ym)) <= d && !billTx(b, ym));
+  const due = S.bills.filter(b => b.auto_add && Math.min(b.day_of_month, daysIn(ym)) <= d && !billTx(b, ym));
   for (const b of due) S.tx.push(await db.insert('transactions', billToTx(b, dueDate(b, ym))));
-  if (due.length) { S.tx.sort((a, b) => b.date.localeCompare(a.date)); toast(`Added ${due.length} recurring item${due.length > 1 ? 's' : ''}`); }
+  if (due.length) { S.tx.sort((a, b) => b.date.localeCompare(a.date)); toast(`Added ${due.length} bill${due.length > 1 ? 's' : ''} due this month`); }
 }
-const saveBudget = (id, v) => run(async () => {
-  const saved = await db.update('categories', id, { budget: v === '' ? null : num(v) });
-  S.categories = S.categories.map(c => (c.id === id ? saved : c));
-}, 'Budget saved');
-const saveRate = (cur, v) => run(async () => {
-  const ov = { ...overrides() };
-  if (v === '' || !num(v)) delete ov[cur]; else ov[cur] = num(v);
-  await db.setting('rate_overrides', ov); S.settings.rate_overrides = ov;
-}, v === '' ? 'Using live rate' : 'Rate saved');
-const addCurrency = cur => run(async () => {
-  const list = [...new Set([...(S.settings.currencies || []), cur])];
-  await db.setting('currencies', list); S.settings.currencies = list;
-}, `${cur} added`);
-
 function exportCsv() {
   const cell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const rows = [['date', 'type', 'amount', 'currency', 'rate', 'amount_etb', 'account', 'to_account', 'category', 'note'],
-    ...S.tx.map(t => [t.date, t.kind, t.amount, t.currency, t.rate, etb(t).toFixed(2), acc(t.account_id)?.name, acc(t.to_account_id)?.name, cat(t.category_id)?.name, t.note])];
+  const rows = [['date', 'type', 'amount', 'currency', 'rate', 'amount_birr', 'category', 'note'],
+    ...S.tx.map(t => [t.date, t.kind === 'income' ? 'earned' : 'spent', t.amount, t.currency, t.rate, birr(t).toFixed(2), cat(t.category_id)?.name, t.note])];
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([rows.map(r => r.map(cell).join(',')).join('\n')], { type: 'text/csv' }));
   a.download = `pocket-${today()}.csv`; a.click(); URL.revokeObjectURL(a.href);
@@ -580,39 +417,46 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('change', e => {
   const el = e.target;
-  if (el.dataset.budget) saveBudget(el.dataset.budget, el.value);
-  else if (el.dataset.rate) saveRate(el.dataset.rate, el.value);
-  else if (el.dataset.setting) run(async () => { await db.setting(el.dataset.setting, num(el.value)); S.settings[el.dataset.setting] = num(el.value); }, 'Saved');
-  else if (el.matches('[data-theme-sel]')) { document.documentElement.dataset.theme = el.value; localStorage.setItem('pocket.theme', el.value); }
-  else if (el.dataset.f && el.type !== 'search') { S.f[el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value; render(); }
+  if (el.matches('#view [data-rate]')) {
+    const ov = { ...overrides() }, c = el.dataset.rate;
+    if (num(el.value)) ov[c] = num(el.value); else delete ov[c];
+    run(async () => { await db.setting('rate_overrides', ov); S.settings.rate_overrides = ov; }, ov[c] ? `${c} rate saved` : `Using the official ${c} rate`);
+  } else if (el.dataset.setting) run(async () => { await db.setting(el.dataset.setting, num(el.value)); S.settings[el.dataset.setting] = num(el.value); }, 'Saved');
+  else if (el.matches('[data-theme-toggle]')) {
+    const t = el.checked ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t; localStorage.setItem('pocket.theme', t);
+  }
 });
 document.addEventListener('input', e => {
-  const el = e.target;
-  if (el.dataset.f === 'q') { S.f.q = el.value; render(); const s = $('[data-f=q]'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+  if (!e.target.matches('[data-q]')) return;
+  S.q = e.target.value; render();
+  const s = $('[data-q]'); s.focus(); s.setSelectionRange(s.value.length, s.value.length);
 });
 
-/* ---------- render & boot ---------- */
+/* ---------- render & start ---------- */
 function render() {
-  $('#month-label').textContent = monthName(S.month);
+  $('#month-label').textContent = monthName(S.month, isThisMonth() || S.month.slice(0, 4) === today().slice(0, 4) ? { month: 'long' } : undefined);
   document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('on', a.dataset.view === S.view));
   $('#view').innerHTML = V[S.view]();
 }
-window.addEventListener('hashchange', () => { S.view = V[location.hash.slice(1)] ? location.hash.slice(1) : 'overview'; render(); scrollTo(0, 0); });
+const viewFromHash = () => (V[location.hash.slice(1)] ? location.hash.slice(1) : 'home');
+window.addEventListener('hashchange', () => { S.view = viewFromHash(); render(); scrollTo(0, 0); });
 
-async function boot() {
-  S.view = V[location.hash.slice(1)] ? location.hash.slice(1) : 'overview';
+async function start() {
+  S.view = viewFromHash();
+  if (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.dataset.theme = 'dark';
   try {
-    const [accounts, categories, bills, goals, debts, settings, tx] = await Promise.all([
-      db.list('accounts', '&order=created_at'), db.list('categories', '&order=kind,created_at'), db.list('bills', '&order=day_of_month'),
-      db.list('goals', '&order=created_at'), db.list('debts', '&order=created_at'), db.list('settings'), loadTx(), loadLive(),
+    const [categories, bills, goals, debts, settings, tx] = await Promise.all([
+      db.list('categories', '&order=kind,name'), db.list('bills', '&order=day_of_month'), db.list('goals', '&order=created_at'),
+      db.list('debts', '&order=created_at'), db.list('settings'), loadTx(), loadLive(),
     ]);
-    Object.assign(S, { accounts, categories, bills, goals, debts, tx, settings: Object.fromEntries(settings.map(s => [s.key, s.value])) });
+    Object.assign(S, { categories, bills, goals, debts, tx, settings: Object.fromEntries(settings.map(s => [s.key, s.value])) });
     render();
-    await autoBills().catch(e => console.error(e));
+    await autoBills().catch(console.error);
     render();
   } catch (e) {
     console.error(e);
-    $('#view').innerHTML = `<div class="empty" style="margin-top:30px">Couldn't load your data. Check your connection.<div style="margin-top:12px"><button class="primary" onclick="location.reload()">Retry</button></div></div>`;
+    $('#view').innerHTML = `<div class="empty">Couldn't load your data. Check your connection.<br><button class="btn small" onclick="location.reload()">Try again</button></div>`;
   }
 }
-boot();
+start();

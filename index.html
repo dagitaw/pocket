@@ -1,43 +1,39 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Pocket — Money tracker</title>
-  <meta name="theme-color" content="#0b0f17">
+  <title>Pocket</title>
+  <meta name="theme-color" content="#f2f4ef">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@75..100,400..700&display=swap">
   <link rel="stylesheet" href="styles.css">
-  <script>try{document.documentElement.dataset.theme=localStorage.getItem('pocket.theme')||'dark'}catch{}</script>
+  <script>try{const t=localStorage.getItem('pocket.theme');if(t)document.documentElement.dataset.theme=t}catch{}</script>
 </head>
 <body>
   <header class="top">
-    <div class="wrap top-row">
-      <div class="brand">
-        <img src="icon.svg" alt="" width="34" height="34">
-        <div><strong>Pocket</strong><small>Money tracker</small></div>
-      </div>
-      <div class="month-nav">
-        <button class="icon-btn" data-act="month" data-d="-1" aria-label="Previous month">‹</button>
-        <span id="month-label"></span>
-        <button class="icon-btn" data-act="month" data-d="1" aria-label="Next month">›</button>
-        <button class="ghost sm" data-act="month" data-d="0">Today</button>
-      </div>
-      <button class="primary add-btn" data-act="add-tx">+ <span>Add transaction</span></button>
+    <a href="#home" class="logo"><img src="icon.svg" alt="" width="28" height="28">Pocket</a>
+    <div class="month">
+      <button class="icon" data-act="month" data-d="-1" aria-label="Previous month">‹</button>
+      <button class="month-name" data-act="month" data-d="0" id="month-label" title="Back to this month"></button>
+      <button class="icon" data-act="month" data-d="1" aria-label="Next month">›</button>
     </div>
-    <nav class="wrap tabs" id="tabs">
-      <a href="#overview" data-view="overview"><i>◎</i>Overview</a>
-      <a href="#transactions" data-view="transactions"><i>≡</i>Transactions</a>
-      <a href="#budgets" data-view="budgets"><i>%</i>Budgets</a>
-      <a href="#bills" data-view="bills"><i>☑</i>Bills</a>
-      <a href="#goals" data-view="goals"><i>★</i>Goals</a>
-      <a href="#debts" data-view="debts"><i>⇄</i>Debts</a>
-      <a href="#settings" data-view="settings"><i>⚙</i>Settings</a>
-    </nav>
   </header>
 
-  <main class="wrap" id="view"><p class="muted center pad">Loading…</p></main>
+  <main id="view"><p class="quiet center">Loading…</p></main>
+
+  <nav class="tabs" id="tabs">
+    <a href="#home" data-view="home"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/></svg>Home</a>
+    <a href="#history" data-view="history"><svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/></svg>History</a>
+    <a href="#bills" data-view="bills"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 9l2 2 4-4"/></svg>Bills</a>
+    <a href="#goals" data-view="goals"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg>Goals</a>
+    <a href="#settings" data-view="settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings</a>
+    <button class="fab" data-act="add" aria-label="Add money in or out">+</button>
+  </nav>
 
   <dialog id="modal"><form method="dialog" id="modal-form"></form></dialog>
   <div id="toast" role="status"></div>

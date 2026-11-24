@@ -1,25 +1,20 @@
-# Pocket — money tracker
+# Pocket
 
-A fast, single-user money tracker built in Birr (ETB) with multi-currency support. Plain HTML/CSS/JS (no build step, no dependencies), data in Supabase, hosted on Vercel.
+A simple personal money tracker in Birr, with other currencies converted at live or your own rates. Plain HTML/CSS/JS (no build step, no npm dependencies), data in Supabase, hosted on Vercel.
 
-## Features
-- **Overview**: income, expenses, net, total balance across accounts, savings target, spending-by-category donut, 6-month income vs expenses chart, smart insights, accounts, bills, recent activity
-- **Transactions**: expense / income / transfer between accounts; search, filter by type, category and account; all-months view; CSV export
-- **Multi-currency**: every account has a currency; live rates (open.er-api.com, cached 6h) with **custom rate overrides** per currency (e.g. parallel-market USD) and a per-transaction rate field. Each transaction stores the rate used, so past months never change
-- **Budgets**: monthly limit per category, progress bars, warnings, "use 3-month average" shortcut
-- **Bills & recurring**: monthly checklist (tick → creates a transaction, untick → removes it), overdue flags, **auto** bills added on their due day
-- **Savings goals**: target, deadline, add/withdraw, "save X per month" plan
-- **Debts & loans**: owed to me / I owe, partial payments, overdue flags
-- **Settings**: accounts, categories (emoji + colour), rates, savings %, dark/light theme
-- Installable on phone (web manifest), mobile bottom nav
+## What it does
+- **Home**: what's left this month, earned vs spent bar with your savings goal marker, spending pie by category with monthly limits (tap a category to set one), bills still to pay, recent entries
+- **Add money in or out**: Spent / Earned, amount in any currency, category, date, note. Non-Birr amounts use your rate, or the official one, and keep that rate forever
+- **History**: month list, Spent/Earned filter, search across all months
+- **Bills**: monthly checklist; ticking a bill adds it to spending; bills can be added automatically on their due day
+- **Goals**: savings goals with "save X a month" plan, plus money owed (lent/borrowed) with partial payments
+- **Settings**: exchange rates, categories, savings goal %, dark mode, CSV download
 
 ## Run locally
-```
-python3 -m http.server 8000   # then open http://localhost:8000
-```
+`python3 -m http.server 8000` then open http://localhost:8000
 
 ## Deploy
-Static site on Vercel (project `pocket`), auto-deploys on every push to `main`. Live: https://pocket-flame-nine.vercel.app
+Vercel project `pocket`, auto-deploys on every push to `main`. Live: https://pocket-flame-nine.vercel.app
 
 ## Database
 Supabase project **Pocket** (`caixinoemxmoeudpqsuc`, eu-central-1). Schema: `supabase/schema.sql`.
