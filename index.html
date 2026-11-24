@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Pocket — Money tracker</title>
+  <meta name="theme-color" content="#0b0f17">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem('pocket.theme')||'dark'}catch{}</script>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-row">
+      <div class="brand">
+        <img src="icon.svg" alt="" width="34" height="34">
+        <div><strong>Pocket</strong><small>Money tracker</small></div>
+      </div>
+      <div class="month-nav">
+        <button class="icon-btn" data-act="month" data-d="-1" aria-label="Previous month">‹</button>
+        <span id="month-label"></span>
+        <button class="icon-btn" data-act="month" data-d="1" aria-label="Next month">›</button>
+        <button class="ghost sm" data-act="month" data-d="0">Today</button>
+      </div>
+      <button class="primary add-btn" data-act="add-tx">+ <span>Add transaction</span></button>
+    </div>
+    <nav class="wrap tabs" id="tabs">
+      <a href="#overview" data-view="overview"><i>◎</i>Overview</a>
+      <a href="#transactions" data-view="transactions"><i>≡</i>Transactions</a>
+      <a href="#budgets" data-view="budgets"><i>%</i>Budgets</a>
+      <a href="#bills" data-view="bills"><i>☑</i>Bills</a>
+      <a href="#goals" data-view="goals"><i>★</i>Goals</a>
+      <a href="#debts" data-view="debts"><i>⇄</i>Debts</a>
+      <a href="#settings" data-view="settings"><i>⚙</i>Settings</a>
+    </nav>
+  </header>
+
+  <main class="wrap" id="view"><p class="muted center pad">Loading…</p></main>
+
+  <dialog id="modal"><form method="dialog" id="modal-form"></form></dialog>
+  <div id="toast" role="status"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
