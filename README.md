@@ -19,7 +19,7 @@ python3 -m http.server 8000   # then open http://localhost:8000
 ```
 
 ## Deploy
-Static site — Vercel serves the folder as-is (no build command).
+Static site on Vercel (project `pocket`), auto-deploys on every push to `main`. Live: https://pocket-flame-nine.vercel.app
 
 ## Database
 Supabase project **Pocket** (`caixinoemxmoeudpqsuc`, eu-central-1). Schema: `supabase/schema.sql`.

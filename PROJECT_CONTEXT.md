@@ -16,5 +16,7 @@
 
 **Testing**: Playwright end-to-end script (kept outside repo) covers add/edit tx, multi-currency, transfers, balances, custom rates, budgets, bill tick/untick/auto, goals, debts, search, CSV, mobile layout; test rows use `TEST` prefix and are deleted after.
 
-**Status (2026-11-24)**: v1 complete and deployed to Vercel. Not yet on GitHub (needs an empty repo created by the owner).
+**Hosting**: GitHub `dagitaw/pocket` (main) → Vercel project `pocket` (team dagitaw), auto-deploys on push. Live: https://pocket-flame-nine.vercel.app
+
+**Status (2026-11-25)**: v1 live.
 **Ideas next**: CSV import, receipts/photos, monthly report PDF, missed auto-bills for past months.
